@@ -116,11 +116,14 @@ public final class SnappyRawDecompressor
 
             if ((opCode & 0x3) == LITERAL) {
                 int literalLength = length + trailer;
+                if (literalLength < 0) {
+                    throw new MalformedInputException(input - inputAddress);
+                }
 
                 // copy literal
                 long literalOutputLimit = output + literalLength;
                 if (literalOutputLimit > fastOutputLimit || input + literalLength > inputLimit - SIZE_OF_LONG) {
-                    if (literalOutputLimit > outputLimit) {
+                    if (literalOutputLimit > outputLimit || input + literalLength > inputLimit) {
                         throw new MalformedInputException(input - inputAddress);
                     }
 
@@ -147,12 +150,18 @@ public final class SnappyRawDecompressor
                 // bit 8).
                 int matchOffset = entry & 0x700;
                 matchOffset += trailer;
+                if (matchOffset < 0) {
+                    throw new MalformedInputException(input - inputAddress);
+                }
 
                 long matchAddress = output - matchOffset;
                 if (matchAddress < outputAddress || output + length > outputLimit) {
                     throw new MalformedInputException(input - inputAddress);
                 }
                 long matchOutputLimit = output + length;
+                if (matchOutputLimit > outputLimit) {
+                    throw new MalformedInputException(input - inputAddress);
+                }
 
                 if (output > fastOutputLimit) {
                     // slow match copy
@@ -185,10 +194,6 @@ public final class SnappyRawDecompressor
                     }
 
                     if (matchOutputLimit > fastOutputLimit) {
-                        if (matchOutputLimit > outputLimit) {
-                            throw new MalformedInputException(input - inputAddress);
-                        }
-
                         while (output < fastOutputLimit) {
                             UNSAFE.putLong(outputBase, output, UNSAFE.getLong(outputBase, matchAddress));
                             matchAddress += SIZE_OF_LONG;
@@ -300,6 +305,9 @@ public final class SnappyRawDecompressor
                     }
                 }
             }
+        }
+        if (result < 0) {
+            throw new MalformedInputException(compressedAddress, "negative compressed length");
         }
         return new int[] {result, bytesRead};
     }

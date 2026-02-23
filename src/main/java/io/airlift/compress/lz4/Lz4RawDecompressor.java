@@ -62,12 +62,18 @@ public final class Lz4RawDecompressor
             // decode literal length
             int literalLength = token >>> 4; // top-most 4 bits of token
             if (literalLength == 0xF) {
+                if (input >= inputLimit) {
+                    throw new MalformedInputException(input - inputAddress);
+                }
                 int value;
                 do {
                     value = UNSAFE.getByte(inputBase, input++) & 0xFF;
                     literalLength += value;
                 }
                 while (value == 255 && input < inputLimit - 15);
+            }
+            if (literalLength < 0) {
+                throw new MalformedInputException(input - inputAddress);
             }
 
             // copy literal
@@ -127,6 +133,9 @@ public final class Lz4RawDecompressor
                 while (value == 255);
             }
             matchLength += MIN_MATCH; // implicit length from initial 4-byte match in encoder
+            if (matchLength < 0) {
+                throw new MalformedInputException(input - inputAddress);
+            }
 
             long matchOutputLimit = output + matchLength;
 

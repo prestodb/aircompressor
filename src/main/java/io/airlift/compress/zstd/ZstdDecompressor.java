@@ -16,9 +16,12 @@ package io.airlift.compress.zstd;
 import io.airlift.compress.Decompressor;
 import io.airlift.compress.MalformedInputException;
 
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 
 import static io.airlift.compress.zstd.UnsafeUtil.getAddress;
+import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 import static sun.misc.Unsafe.ARRAY_BYTE_BASE_OFFSET;
 
 public class ZstdDecompressor
@@ -30,6 +33,9 @@ public class ZstdDecompressor
     public int decompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset, int maxOutputLength)
             throws MalformedInputException
     {
+        verifyRange(input, inputOffset, inputLength);
+        verifyRange(output, outputOffset, maxOutputLength);
+
         long inputAddress = ARRAY_BYTE_BASE_OFFSET + inputOffset;
         long inputLimit = inputAddress + inputLength;
         long outputAddress = ARRAY_BYTE_BASE_OFFSET + outputOffset;
@@ -39,9 +45,16 @@ public class ZstdDecompressor
     }
 
     @Override
-    public void decompress(ByteBuffer input, ByteBuffer output)
+    public void decompress(ByteBuffer inputBuffer, ByteBuffer outputBuffer)
             throws MalformedInputException
     {
+        // Java 9+ added an overload of various methods in ByteBuffer. When compiling with Java 11+ and targeting Java 8 bytecode
+        // the resulting signatures are invalid for JDK 8, so accesses below result in NoSuchMethodError. Accessing the
+        // methods through the interface class works around the problem
+        // Sidenote: we can't target "javac --release 8" because Unsafe is not available in the signature data for that profile
+        Buffer input = inputBuffer;
+        Buffer output = outputBuffer;
+
         Object inputBase;
         long inputAddress;
         long inputLimit;
@@ -84,7 +97,7 @@ public class ZstdDecompressor
         // collected in a block, and technically, the JVM is allowed to eliminate these locks.
         synchronized (input) {
             synchronized (output) {
-                int written = new ZstdFrameDecompressor().decompress(inputBase, inputAddress, inputLimit, outputBase, outputAddress, outputLimit);
+                int written = decompressor.decompress(inputBase, inputAddress, inputLimit, outputBase, outputAddress, outputLimit);
                 output.position(output.position() + written);
             }
         }
@@ -94,5 +107,13 @@ public class ZstdDecompressor
     {
         int baseAddress = ARRAY_BYTE_BASE_OFFSET + offset;
         return ZstdFrameDecompressor.getDecompressedSize(input, baseAddress, baseAddress + length);
+    }
+
+    private static void verifyRange(byte[] data, int offset, int length)
+    {
+        requireNonNull(data, "data is null");
+        if (offset < 0 || length < 0 || offset + length > data.length) {
+            throw new IllegalArgumentException(format("Invalid offset or length (%s, %s) in array of length %s", offset, length, data.length));
+        }
     }
 }
